@@ -22,6 +22,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -63,5 +65,15 @@ jobs:
             echo "Release $tag already exists"
             exit 0
           fi
+          previous=$(git describe --tags --match 'v[0-9]*' --abbrev=0 "$GITHUB_SHA^" 2>/dev/null || true)
+          range="$GITHUB_SHA"
+          if [ -n "$previous" ]; then range="$previous..$GITHUB_SHA"; fi
+          {
+            printf '## 本版改动\n\n'
+            git log --format='- %s (%h)%n%b' "$range" -- . ':(exclude)logo/**'
+            if [ -n "$previous" ]; then
+              printf '\n[查看完整变更](https://github.com/%s/compare/%s...%s)\n' "$GITHUB_REPOSITORY" "$previous" "$tag"
+            fi
+          } > "$RUNNER_TEMP/release-notes.md"
           gh release create "$tag" "dist/IPTV-${VERSION}-fnOS.fpk" "dist/IPTV-${VERSION}-fnOS.fpk.sha256" \
-            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "IPTV $VERSION" --generate-notes
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "IPTV $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"

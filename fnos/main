@@ -5,10 +5,11 @@ server="${TRIM_APPDEST:?}/server.js"
 var="${TRIM_PKGVAR:?}"
 pidfile="$var/app.pid"
 port="${TRIM_SERVICE_PORT:-8787}"
+socket="${TRIM_APPDEST}/app.sock"
 share=${TRIM_DATA_SHARE_PATHS:-}
 data=${share%%:*}
-if [ -z "$data" ] && [ -d /var/apps/iptv-manager/share/data ]; then
-    data=/var/apps/iptv-manager/share/data
+if [ -z "$data" ] && [ -d /var/apps/iptv-manager/shares/data ]; then
+    data=/var/apps/iptv-manager/shares/data
 fi
 data=${data:-$var/data}
 
@@ -53,13 +54,14 @@ case "${1:-}" in
             cp -- "$var/data/settings.json" "$data/.settings-migration.tmp" &&
                 mv -n -- "$data/.settings-migration.tmp" "$data/settings.json" || fail "Cannot migrate IPTV settings"
         fi
-        PORT="$port" DATA_DIR="$data" nohup "$node" "$server" > "$var/app.log" 2>&1 < /dev/null &
+        if [ -S "$socket" ]; then rm -f -- "$socket" || fail "Cannot remove stale gateway socket"; fi
+        PORT="$port" DATA_DIR="$data" FNOS_SOCKET="$socket" nohup "$node" "$server" > "$var/app.log" 2>&1 < /dev/null &
         pid=$!
         printf '%s\n' "$pid" > "$pidfile"
         for ((attempt=0; attempt<10; attempt++)); do
             sleep 1
             running || fail "IPTV failed to start. See $var/app.log"
-            if "$node" -e 'fetch("http://127.0.0.1:" + process.argv[1] + "/playlist.m3u", {signal: AbortSignal.timeout(800)}).then(response => { if (!response.ok) process.exitCode = 1; return response.body.cancel(); }).catch(() => process.exitCode = 1)' "$port"; then
+            if [ -S "$socket" ] && "$node" -e 'fetch("http://127.0.0.1:" + process.argv[1] + "/playlist.m3u", {signal: AbortSignal.timeout(800)}).then(response => { if (!response.ok) process.exitCode = 1; return response.body.cancel(); }).catch(() => process.exitCode = 1)' "$port"; then
                 exit 0
             fi
         done
@@ -76,6 +78,7 @@ case "${1:-}" in
             if running; then kill -KILL "$pid" || fail "Unable to stop IPTV"; fi
         fi
         rm -f -- "$pidfile"
+        if [ -S "$socket" ]; then rm -f -- "$socket"; fi
         ;;
     status)
         running && exit 0

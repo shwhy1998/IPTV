@@ -4,9 +4,9 @@
       "title": "IPTV 管理台",
       "icon": "images/icon_{0}.png",
       "type": "url",
-      "protocol": "http",
-      "port": "8787",
-      "url": "/",
+      "gatewayPrefix": "/app/iptv-manager",
+      "gatewaySocket": "app.sock",
+      "url": "/app/iptv-manager/",
       "allUsers": false
     }
   }

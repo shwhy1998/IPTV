@@ -30,6 +30,7 @@ export async function createEpg(directory, getSources, getRefreshTimes) {
   await mkdir(directory, { recursive: true });
   const cache = new Map();
   const inflight = new Map();
+  let guideCache;
   function current(source) {
     const entry = cache.get(source.id);
     return entry?.url === source.url ? entry : undefined;
@@ -47,8 +48,15 @@ export async function createEpg(directory, getSources, getRefreshTimes) {
   async function download(source, signal) {
     const response = await fetch(source.url, { signal: AbortSignal.any([signal, AbortSignal.timeout(120000)]) });
     if (!response.ok) throw new Error(`节目单服务器返回 HTTP ${response.status}`);
-    let bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes[0] === 31 && bytes[1] === 139) bytes = gunzipSync(bytes);
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of response.body) {
+      size += chunk.length;
+      if (size > 32 * 1024 * 1024) throw new Error('节目单下载超过 32 MiB');
+      chunks.push(chunk);
+    }
+    let bytes = Buffer.concat(chunks, size);
+    if (bytes[0] === 31 && bytes[1] === 139) bytes = gunzipSync(bytes, { maxOutputLength: 64 * 1024 * 1024 });
     const xml = bytes.toString('utf8').replace(/^\uFEFF/, '');
     if (XMLValidator.validate(xml) !== true) throw new Error('节目单 XML 格式不正确');
     const parsed = parse(xml);
@@ -58,6 +66,7 @@ export async function createEpg(directory, getSources, getRefreshTimes) {
     await writeFile(temporary, JSON.stringify({ url: source.url, time, xml }));
     await rename(temporary, new URL(source.id + '.json', directory));
     cache.set(source.id, { ...parsed, url: source.url, time });
+    guideCache = undefined;
   }
 
   function refresh(source) {
@@ -81,6 +90,7 @@ export async function createEpg(directory, getSources, getRefreshTimes) {
       await running.promise.catch(() => {});
     }
     cache.delete(id);
+    guideCache = undefined;
     await Promise.all(['.json', '.tmp'].map(extension =>
       rm(new URL(id + extension, directory), { force: true })));
   }
@@ -93,6 +103,8 @@ export async function createEpg(directory, getSources, getRefreshTimes) {
   }
 
   function xmltv(channels) {
+    const sources = getSources();
+    if (guideCache?.channels === channels && guideCache.sources === sources) return guideCache.xml;
     const mapped = new Map();
     for (const channel of channels) {
       if (!channel.epgSourceId || !channel.epgId) continue;
@@ -114,7 +126,9 @@ export async function createEpg(directory, getSources, getRefreshTimes) {
         (node.channel ? definitions : programmes).push(item);
       }
     }
-    return '<?xml version="1.0" encoding="UTF-8"?>\n' + builder.build([{ tv: [...definitions, ...programmes] }]);
+    const xml = '<?xml version="1.0" encoding="UTF-8"?>\n' + builder.build([{ tv: [...definitions, ...programmes] }]);
+    guideCache = { channels, sources, xml };
+    return xml;
   }
 
   function refreshInBackground(sources) {

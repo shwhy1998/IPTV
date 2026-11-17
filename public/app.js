@@ -89,7 +89,7 @@ function notice(message, error = false) {
 }
 
 async function api(url, options) {
-  const response = await fetch(url, options);
+  const response = await fetch(new URL(url.slice(1), document.baseURI), options);
   const result = await response.json();
   if (!response.ok) throw new Error(result.error);
   return result;

@@ -1,11 +1,17 @@
 import { createServer } from 'node:http';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { isIPv4 } from 'node:net';
+import { chmodSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { pathToFileURL } from 'node:url';
 import { resolve, sep } from 'node:path';
 import { createEpg, guideId } from './epg.js';
 
 const port = Number(process.env.PORT || 8787);
+const fnosSocket = process.env.FNOS_SOCKET;
+const gatewayPrefix = '/app/iptv-manager';
+const maxSettingsBytes = 32 * 1024 * 1024;
 const data = process.env.DATA_DIR ? pathToFileURL(resolve(process.env.DATA_DIR) + sep) : new URL('./data/', import.meta.url);
 const publicBase = process.env.PUBLIC_BASE_URL ? new URL(process.env.PUBLIC_BASE_URL).origin : '';
 const stateFile = new URL('settings.json', data);
@@ -120,26 +126,83 @@ function playlist(origin) {
   return entries.join('\n') + '\n';
 }
 
-const assets = {
-  '/': ['index.html', 'text/html'],
-  '/app.js': ['app.js', 'text/javascript'],
-  '/style.css': ['style.css', 'text/css']
-};
-createServer(async (req, res) => {
+function representation(body) {
+  return {
+    body,
+    etag: `W/"${createHash('sha256').update(body).digest('base64url')}"`
+  };
+}
+
+const assets = new Map();
+for (const [path, filename, type] of [
+  ['/', 'index.html', 'text/html'],
+  ['/app.js', 'app.js', 'text/javascript'],
+  ['/style.css', 'style.css', 'text/css']
+]) {
+  const body = await readFile(new URL(`./public/${filename}`, import.meta.url));
+  assets.set(path, { ...representation(body), type: type + '; charset=utf-8' });
+}
+let guideResponse;
+
+async function request(req, res, gateway = false) {
   const origin = publicBase || `http://${req.headers.host}`;
-  const url = new URL(req.url, 'http://localhost');
-  const { pathname } = url;
-  const send = (status, type, body) => {
-    res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
-    res.end(body);
+  const url = new URL('http://localhost' + (req.url.startsWith('/') ? req.url : '/invalid-request'));
+  const reading = req.method === 'GET' || req.method === 'HEAD';
+  let { pathname } = url;
+  const send = (status, type, body, headers = {}) => {
+    res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers });
+    res.end(req.method === 'HEAD' ? undefined : body);
   };
   const json = (value, status = 200) => send(status, 'application/json; charset=utf-8', JSON.stringify(value));
+  const sendCached = (type, entry, compressed = false) => {
+    const headers = { 'Cache-Control': 'no-cache', ETag: entry.etag };
+    if (compressed) headers.Vary = 'Accept-Encoding';
+    const tags = req.headers['if-none-match']?.split(',').map(tag => tag.trim());
+    if (tags?.includes(entry.etag) || tags?.includes('*')) return send(304, type, undefined, headers);
+    const acceptsGzip = /(?:^|,)\s*gzip\s*(?:;\s*q=(?!0(?:\.0*)?(?:\s*,|\s*$))[\d.]+)?\s*(?:,|$)/i.test(req.headers['accept-encoding'] || '');
+    if (compressed && acceptsGzip) {
+      entry.gzip ??= gzipSync(entry.body, { level: 3 });
+      headers['Content-Encoding'] = 'gzip';
+      return send(200, type, entry.gzip, headers);
+    }
+    return send(200, type, entry.body, headers);
+  };
   try {
+    if (gateway) {
+      if (!/^\d+$/.test(req.headers['x-trim-userid'] || '') || req.headers['x-trim-isadmin'] !== 'true') {
+        return json({ error: '请通过飞牛桌面使用管理员账号打开 IPTV 管理台' }, 403);
+      }
+      if (pathname === gatewayPrefix && reading) {
+        return send(308, 'text/plain', '', { Location: gatewayPrefix + '/' + url.search });
+      }
+      if (!pathname.startsWith(gatewayPrefix + '/')) return send(404, 'text/plain', 'Not found');
+      pathname = pathname.slice(gatewayPrefix.length);
+    } else if (fnosSocket && (!reading || !(
+      pathname === '/playlist.m3u' || pathname === '/epg.xml' || pathname.startsWith('/logos/')
+    ))) {
+      return send(404, 'text/plain', 'Not found');
+    }
+    if (!reading && req.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(req.headers['sec-fetch-site'])) {
+      return json({ error: '跨站请求已拒绝' }, 403);
+    }
     if (pathname === '/api/state' && req.method === 'PUT') {
-      let body = '';
-      req.setEncoding('utf8');
-      for await (const chunk of req) body += chunk;
-      const next = JSON.parse(body);
+      if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') {
+        return json({ error: '请使用 JSON 提交设置' }, 415);
+      }
+      if (Number(req.headers['content-length']) > maxSettingsBytes) {
+        return json({ error: '配置内容超过 32 MiB' }, 413);
+      }
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of req.iterator({ destroyOnReturn: false })) {
+        size += chunk.length;
+        if (size > maxSettingsBytes) {
+          req.resume();
+          return json({ error: '配置内容超过 32 MiB' }, 413);
+        }
+        chunks.push(chunk);
+      }
+      const next = JSON.parse(Buffer.concat(chunks, size).toString('utf8'));
       validate(next);
       const save = pendingSave.then(async () => {
         const removed = state.epgSources.filter(source => !next.epgSources.some(item => item.id === source.id));
@@ -154,8 +217,8 @@ createServer(async (req, res) => {
       await save;
       return json({ saved: true });
     }
-    if (pathname === '/api/state') return json({ state });
-    if (pathname === '/api/epg') return json(epg.report());
+    if (reading && pathname === '/api/state') return json({ state });
+    if (reading && pathname === '/api/epg') return json(epg.report());
     if (pathname === '/api/epg/refresh' && req.method === 'POST') {
       const id = url.searchParams.get('source');
       const sources = id ? state.epgSources.filter(source => source.id === id) : state.epgSources;
@@ -165,24 +228,38 @@ createServer(async (req, res) => {
         ? [`${sources[index].name}：${result.reason.message}`] : []);
       return json({ sources: epg.report(), errors });
     }
-    if (pathname === '/epg.xml') return send(200, 'application/xml; charset=utf-8', epg.xmltv(state.channels));
-    if (pathname === '/playlist.m3u') {
+    if (reading && pathname === '/epg.xml') {
+      const xml = epg.xmltv(state.channels);
+      if (guideResponse?.body !== xml) guideResponse = representation(xml);
+      return sendCached('application/xml; charset=utf-8', guideResponse, true);
+    }
+    if (reading && !gateway && pathname === '/playlist.m3u') {
       if (url.searchParams.has('download')) res.setHeader('Content-Disposition', 'attachment; filename="iptv.m3u"');
       return send(200, 'audio/x-mpegurl; charset=utf-8', playlist(origin));
     }
-    if (pathname.startsWith('/logos/')) {
+    if (reading && pathname.startsWith('/logos/')) {
       const logo = state.channels.find(channel => channel.id === pathname.slice(7))?.logo;
       const match = logo?.match(/^data:(image\/\w+);base64,(.+)$/);
       if (match) return send(200, match[1], Buffer.from(match[2], 'base64'));
     }
-    if (assets[pathname]) {
-      const [file, type] = assets[pathname];
-      return send(200, type + '; charset=utf-8', await readFile(new URL(`./public/${file}`, import.meta.url)));
-    }
+    const asset = assets.get(pathname);
+    if (reading && asset) return sendCached(asset.type, asset);
     send(404, 'text/plain', 'Not found');
   } catch (error) {
     json({ error: error.message }, 400);
   }
-}).listen(port, '0.0.0.0', () => {
-  console.log(`IPTV 管理台 http://localhost:${port}`);
+}
+
+const serverOptions = { requestTimeout: 30000, headersTimeout: 10000, keepAliveTimeout: 5000 };
+if (fnosSocket) {
+  // Only the package account and root (fnOS trim_http_cgi) can connect.
+  const previousMask = process.umask(0o077);
+  createServer(serverOptions, (req, res) => request(req, res, true)).listen(fnosSocket, () => {
+    chmodSync(fnosSocket, 0o600);
+    process.umask(previousMask);
+    console.log(`IPTV 管理台 ${gatewayPrefix}/`);
+  });
+}
+createServer(serverOptions, (req, res) => request(req, res)).listen(port, '0.0.0.0', () => {
+  console.log(fnosSocket ? `IPTV 只读订阅端口 ${port}` : `IPTV 管理台 http://localhost:${port}`);
 });

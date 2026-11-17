@@ -10,3 +10,4 @@ desktop_uidir=ui
 desktop_applaunchname=iptv-manager.main
 ctl_stop=true
 service_port=8787
+os_min_version=1.1.3100

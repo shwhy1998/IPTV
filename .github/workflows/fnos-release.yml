@@ -29,7 +29,7 @@ jobs:
       - name: Set release version
         run: echo "VERSION=1.0.$((GITHUB_RUN_NUMBER - 1))" >> "$GITHUB_ENV"
       - name: Install dependencies
-        run: npm ci --omit=dev
+        run: npm ci --omit=dev --no-bin-links
       - name: Download fnpack
         run: |
           curl --fail --silent --show-error --location --retry 3 \
@@ -47,6 +47,12 @@ jobs:
           cd dist
           package="IPTV-${VERSION}-fnOS.fpk"
           tar -tf "$package"
+          tar -xf "$package" app.tgz
+          tar -tvf app.tgz > app-contents.txt
+          if grep -q '^l' app-contents.txt; then
+            echo "The fnOS payload must not contain symbolic links" >&2
+            exit 1
+          fi
           sha256sum "$package" > "$package.sha256"
       - name: Publish release
         env:

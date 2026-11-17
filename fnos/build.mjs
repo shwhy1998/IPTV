@@ -35,7 +35,10 @@ await Promise.all([
 ]);
 for (const script of await readdir(join(pkg, 'cmd'))) await chmod(join(pkg, 'cmd', script), 0o755);
 for (const file of ['server.js', 'epg.js', 'package.json', 'package-lock.json', 'public', 'node_modules']) {
-  await cp(join(root, file), join(app, file), { recursive: true });
+  await cp(join(root, file), join(app, file), {
+    recursive: true,
+    filter: source => basename(source) !== '.bin'
+  });
 }
 
 run(fnpack, ['build'], pkg);

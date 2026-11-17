@@ -27,7 +27,7 @@ const attr = escape;
 const field = (label, name, value, options = '') =>
   `<label>${label}<input name="${name}" value="${attr(value)}" ${options}></label>`;
 const select = (label, name, value, choices) =>
-  `<label>${label}<select name="${name}">${choices.map(([key, text]) =>
+  `<label>${label}<select name="${name}" aria-label="${attr(label)}">${choices.map(([key, text]) =>
     `<option value="${attr(key)}" ${key === value ? 'selected' : ''}>${escape(text)}</option>`).join('')}</select></label>`;
 const types = [['telecom', '电信 / 中兴 / 烽火'], ['huawei', '华为']];
 const button = (text, action, extra = '') => `<button type="button" data-action="${action}" ${extra}>${text}</button>`;

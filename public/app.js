@@ -124,7 +124,8 @@ function channelList() {
     .filter(({ channel }) => !groupFilter || ':' + channel.group === groupFilter);
   return header('频道与线路', `${state.channels.length} 个频道，${state.channels.reduce((total, channel) => total + channel.lines.length, 0)} 条组播线路`,
     `<div class="actions">${button('分组管理', 'groups')}${button('＋ 新增频道', 'new', 'class="primary"')}</div>`) +
-    (state.channels.length || groups.length ? `<section class="panel channel-panel" aria-label="频道列表"><div class="list-head">
+    (state.channels.length || groups.length ? `<section class="panel channel-panel" aria-label="频道列表">
+      <div class="group-tabs" aria-label="频道分组">${[['', '全部', state.channels.length], ...groups.map(group => [':' + group, group, state.channels.filter(channel => channel.group === group).length]), ...(hasUngrouped ? [[':', '未分组', state.channels.filter(channel => !channel.group).length]] : [])].map(([value, name, count]) => button(escape(name) + '<span>' + count + '</span>', 'filter-group', `data-value="${attr(value)}" aria-pressed="${value === groupFilter}"`)).join('')}</div><div class="list-head">
       ${field('搜索频道', 'channel-search', channelQuery, 'type="search" placeholder="输入频道名或组播地址"')}
       ${select('按分组筛选', 'group-filter', groupFilter, [
         ['', '全部分组'], ...groups.map(group => [':' + group, group]), ...(hasUngrouped ? [[':', '未分组']] : [])
@@ -138,7 +139,7 @@ function channelList() {
         const terms = [channel.name, channel.group, ...channel.lines.map(line => line.target), ...labels].join(' ').toLowerCase();
         return `<article class="row channel-row" data-search="${attr(terms)}">
         <div class="channel-identity">${channelLogo(channel)}<div><strong>${escape(channel.name)}</strong>
-        <small>${escape(channel.group || '未分组')}</small></div></div>
+        <small class="channel-address">${escape(channel.lines[0]?.target || '')}</small></div></div>
         <div class="line-labels" aria-label="线路">${labels.map(label => `<span>${escape(label)}</span>`).join('')}</div>
         <div class="fcc-status ${fcc ? 'is-enabled' : ''}" aria-label="FCC ${fcc ? '已配置' : '未配置'}">${fcc ? '已配置' : '未配置'}</div>
         <div class="actions">${button('↑', 'move', `data-index="${index}" data-target="${previous?.index ?? ''}" aria-label="上移 ${attr(channel.name)}" ${previous ? '' : 'disabled'}`)}
@@ -347,6 +348,8 @@ document.addEventListener('click', async event => {
       managingGroups = false;
       editingSource = null;
       if (page === 'settings') epgSources = await api('/api/epg');
+    } else if (action === 'filter-group') {
+      groupFilter = control.dataset.value;
     } else if (action === 'source-add' || action === 'source-edit' || action === 'source-cancel') {
       editingSource = action === 'source-cancel' ? null : id ?? '';
       render();

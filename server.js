@@ -11,6 +11,7 @@ const publicBase = process.env.PUBLIC_BASE_URL ? new URL(process.env.PUBLIC_BASE
 const stateFile = new URL('settings.json', data);
 const tempFile = new URL('settings.tmp', data);
 const defaults = {
+  epgRefreshTimes: ['00:40', '06:40', '13:40', '18:40'],
   epgSources: [{ id: 'sh-telecom', name: '上海电信', url: 'https://epg.deny.vip/sh/tel-epg.xml' }],
   fcc: '',
   fccType: 'telecom',
@@ -30,6 +31,7 @@ if (migrate) {
   }] : [];
   for (const channel of state.channels) channel.epgSourceId = channel.epgId ? state.epgSources[0]?.id ?? '' : '';
 }
+state.epgRefreshTimes ??= defaults.epgRefreshTimes;
 delete state.epg;
 delete state.router;
 if (migrate) {
@@ -37,7 +39,7 @@ if (migrate) {
   await rename(tempFile, stateFile);
 }
 let pendingSave = Promise.resolve();
-const epg = await createEpg(new URL('epg/', data), () => state.epgSources);
+const epg = await createEpg(new URL('epg/', data), () => state.epgSources, () => state.epgRefreshTimes);
 
 function check(condition, message) {
   if (!condition) throw new Error(message);
@@ -54,6 +56,11 @@ function address(value) {
 }
 
 function validate(next) {
+  next.epgRefreshTimes ??= state.epgRefreshTimes;
+  const times = next.epgRefreshTimes;
+  check(Array.isArray(times) && times.length > 0 && times.every(time =>
+    typeof time === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)), '请至少填写一个 24 小时制刷新时间，例如 06:40');
+  next.epgRefreshTimes = [...new Set(times)].sort();
   const sources = new Set();
   for (const source of next.epgSources) {
     check(/^[a-z0-9-]+$/.test(source.id) && !sources.has(source.id), 'EPG 源 ID 无效或重复');

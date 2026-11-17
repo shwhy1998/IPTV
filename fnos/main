@@ -5,6 +5,12 @@ server="${TRIM_APPDEST:?}/server.js"
 var="${TRIM_PKGVAR:?}"
 pidfile="$var/app.pid"
 port="${TRIM_SERVICE_PORT:-8787}"
+share=${TRIM_DATA_SHARE_PATHS:-}
+data=${share%%:*}
+if [ -z "$data" ] && [ -d /var/apps/iptv-manager/share/data ]; then
+    data=/var/apps/iptv-manager/share/data
+fi
+data=${data:-$var/data}
 
 find_node() {
     local candidate major best=21
@@ -39,8 +45,15 @@ case "${1:-}" in
     start)
         running && exit 0
         find_node || fail "需要 Node.js v22 或更高版本，请先在飞牛应用中心安装 Node.js。"
-        mkdir -p "$var/data" || fail "Cannot create the IPTV data directory"
-        PORT="$port" DATA_DIR="$var/data" nohup "$node" "$server" > "$var/app.log" 2>&1 < /dev/null &
+        mkdir -p "$data" || fail "Cannot create the IPTV data directory"
+        if [ "$data" != "$var/data" ] && [ ! -e "$data/settings.json" ] && [ -f "$var/data/settings.json" ]; then
+            if [ -d "$var/data/epg" ]; then
+                cp -Rn -- "$var/data/epg" "$data/" || fail "Cannot migrate IPTV EPG cache"
+            fi
+            cp -- "$var/data/settings.json" "$data/.settings-migration.tmp" &&
+                mv -n -- "$data/.settings-migration.tmp" "$data/settings.json" || fail "Cannot migrate IPTV settings"
+        fi
+        PORT="$port" DATA_DIR="$data" nohup "$node" "$server" > "$var/app.log" 2>&1 < /dev/null &
         pid=$!
         printf '%s\n' "$pid" > "$pidfile"
         for ((attempt=0; attempt<10; attempt++)); do

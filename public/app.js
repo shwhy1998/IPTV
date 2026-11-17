@@ -250,7 +250,10 @@ function settingsPage() {
     `<section class="panel form-stack"><div class="section-title"><h2>电子节目单</h2>
       <div class="actions">${button('刷新全部', 'read-epg', state.epgSources.length ? '' : 'disabled')}
       ${button('＋ 添加 EPG 源', 'source-add', 'class="primary"')}</div></div>
-      <p class="hint">每天北京时间 00:15、08:15、16:15 自动刷新。</p>
+      <form id="epg-schedule" class="source-form form-stack">
+        ${field('每日刷新时间（北京时间）', 'refresh-times', state.epgRefreshTimes.join('、'), 'required placeholder="00:40、06:40、13:40、18:40"')}
+        <div class="actions"><p class="hint grow">使用 24 小时制，多个时间用逗号、顿号或空格分隔。</p><button>保存时间</button></div>
+      </form>
       <div class="source-list">${sources || '<p class="empty-group">暂无 EPG 源。</p>'}
       ${editingSource === '' ? sourceForm() : ''}</div>
     </section><form id="settings-form" class="panel form-stack"><h2>默认 FCC</h2>
@@ -555,6 +558,8 @@ main.addEventListener('submit', async event => {
       const source = { id: id || newId(), name: value('source-name'), url: value('source-url') };
       if (id) next.epgSources = next.epgSources.map(item => item.id === id ? source : item);
       else next.epgSources.push(source);
+    } else if (form.id === 'epg-schedule') {
+      next.epgRefreshTimes = value('refresh-times').split(/[、，,\s]+/).filter(Boolean).map(time => time.padStart(5, '0'));
     } else if (form.id === 'settings-form') {
       for (const name of ['fcc', 'fccType']) next[name] = value(name);
     }

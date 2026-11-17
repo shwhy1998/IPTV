@@ -1,1 +1,5 @@
-{}
+{
+  "data-share": {
+    "shares": [{ "name": "iptv-manager/data" }]
+  }
+}

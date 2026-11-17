@@ -26,7 +26,7 @@ function parse(xml) {
   return { tv, channels };
 }
 
-export async function createEpg(directory, getSources) {
+export async function createEpg(directory, getSources, getRefreshTimes) {
   await mkdir(directory, { recursive: true });
   const cache = new Map();
   const inflight = new Map();
@@ -126,7 +126,7 @@ export async function createEpg(directory, getSources) {
   let lastSlot = '';
   function checkSchedule() {
     const slot = clock.format(new Date());
-    if (!/(?:00|08|16):15$/.test(slot) || slot === lastSlot) return;
+    if (!getRefreshTimes().includes(slot.slice(-5)) || slot === lastSlot) return;
     lastSlot = slot;
     refreshInBackground(getSources());
   }

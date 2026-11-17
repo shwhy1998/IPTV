@@ -8,6 +8,5 @@ maintainer=shwhy1998
 maintainer_url=https://github.com/shwhy1998/IPTV
 desktop_uidir=ui
 desktop_applaunchname=iptv-manager.main
-install_dep_apps=nodejs_v22
 ctl_stop=true
 service_port=8787

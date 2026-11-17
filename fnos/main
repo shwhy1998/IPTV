@@ -1,10 +1,24 @@
 #!/bin/bash
 
-node="/var/apps/nodejs_v22/target/bin/node"
+node=""
 server="${TRIM_APPDEST:?}/server.js"
 var="${TRIM_PKGVAR:?}"
 pidfile="$var/app.pid"
 port="${TRIM_SERVICE_PORT:-8787}"
+
+find_node() {
+    local candidate major best=21
+    for candidate in /var/apps/nodejs_v*/target/bin/node /var/apps/nodejs/target/bin/node "$(command -v node || true)"; do
+        [ -x "$candidate" ] || continue
+        major=$("$candidate" -p 'process.versions.node.split(".")[0]' 2>/dev/null) || continue
+        [[ "$major" =~ ^[0-9]+$ ]] || continue
+        if (( major > best )); then
+            best=$major
+            node=$candidate
+        fi
+    done
+    [ -n "$node" ]
+}
 
 running() {
     [ -r "$pidfile" ] || return 1
@@ -24,7 +38,7 @@ fail() {
 case "${1:-}" in
     start)
         running && exit 0
-        [ -x "$node" ] || fail "Node.js v22 is unavailable"
+        find_node || fail "需要 Node.js v22 或更高版本，请先在飞牛应用中心安装 Node.js。"
         mkdir -p "$var/data" || fail "Cannot create the IPTV data directory"
         PORT="$port" DATA_DIR="$var/data" nohup "$node" "$server" > "$var/app.log" 2>&1 < /dev/null &
         pid=$!

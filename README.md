@@ -29,7 +29,7 @@ Windows PowerShell 可以使用 `npm.cmd ci` 和 `npm.cmd start`。
 
 ## FNOS 安装包与发布
 
-从 [GitHub Releases](https://github.com/shwhy1998/IPTV/releases) 下载 `IPTV-<版本>-fnOS.fpk`，在飞牛应用中心选择「手动安装」。安装包依赖应用中心的 Node.js v22，提供桌面入口及启停管理，默认端口为 8787。把 rtp2httpd 的外部 M3U 地址指向 `http://NAS地址:8787/playlist.m3u`。
+从 [GitHub Releases](https://github.com/shwhy1998/IPTV/releases) 下载 `IPTV-<版本>-fnOS.fpk`，在飞牛应用中心选择「手动安装」。安装包会使用 NAS 上已安装的 Node.js v22 或更新版本。请从飞牛应用中心安装一个符合要求的版本。IPTV 提供桌面入口及启停管理，默认端口为 8787。把 rtp2httpd 的外部 M3U 地址指向 `http://NAS地址:8787/playlist.m3u`。
 
 安装包首次启动会创建自己的数据目录。迁移电脑上的频道配置时，先停止 NAS 上的应用，把本地 `data/` 内容复制到 FNOS 为应用提供的 `TRIM_PKGVAR/data/`，保留应用用户的读写权限，再启动。升级时应用继续使用该数据目录。
 

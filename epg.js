@@ -10,8 +10,11 @@ const clock = new Intl.DateTimeFormat('en-GB', {
   hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
 });
 
-export function guideId(sourceId, id) {
-  return `${sourceId}:${encodeURIComponent(id)}`;
+export function guideId(source, id, sources) {
+  const duplicate = sources.some(item => item.id !== source.id && item.name === source.name);
+  const name = encodeURIComponent(source.name);
+  const prefix = duplicate ? name + ':' + source.id : name;
+  return prefix + ':' + encodeURIComponent(id);
 }
 
 function parse(xml) {
@@ -122,7 +125,7 @@ export async function createEpg(directory, getSources, getRefreshTimes) {
         const key = node.channel ? '@_id' : '@_channel';
         const attrs = node[':@'];
         if (!selected.has(attrs?.[key])) continue;
-        const item = { ...node, ':@': { ...attrs, [key]: guideId(source.id, attrs[key]) } };
+        const item = { ...node, ':@': { ...attrs, [key]: guideId(source, attrs[key], sources) } };
         (node.channel ? definitions : programmes).push(item);
       }
     }

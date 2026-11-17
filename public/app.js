@@ -203,8 +203,7 @@ function editor() {
   return header(draft.id ? '编辑频道' : '新增频道', '同一频道的线路共用台标和 EPG。') +
     `<form id="channel-form" class="panel form-stack"><div class="grid">
       ${field('频道名', 'name', draft.name, 'required placeholder="例如 CCTV-1"')}
-      ${field('分组', 'group', draft.group, 'list="channel-groups" placeholder="选择或输入分组"')}
-      <datalist id="channel-groups">${groupNames(state).map(group => `<option value="${attr(group)}"></option>`).join('')}</datalist>
+      ${select('分组', 'group', draft.group, [['', '未分组'], ...groupNames(state).map(group => [group, group])])}
       ${guidePicker()}
       ${epgSources.some(source => source.channels.length) ? '' : '<p class="hint wide">先到设置刷新 EPG 源，即可搜索和选择频道。</p>'}
     </div><fieldset><legend>频道台标</legend>

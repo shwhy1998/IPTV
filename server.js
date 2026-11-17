@@ -110,7 +110,7 @@ function playlist(origin) {
   for (const channel of state.channels) {
     const logo = channel.logo.startsWith('data:') ? `${origin}/logos/${channel.id}` : channel.logo;
     const id = channel.epgSourceId && channel.epgId
-      ? directGuide ? channel.epgId : guideId(channel.epgSourceId, channel.epgId)
+      ? directGuide ? channel.epgId : guideId(state.epgSources.find(source => source.id === channel.epgSourceId), channel.epgId, state.epgSources)
       : '';
     const metadata = Object.entries({
       'tvg-id': id, 'tvg-name': channel.name, 'tvg-logo': logo, 'group-title': channel.group

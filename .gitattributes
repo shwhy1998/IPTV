@@ -1,0 +1,3 @@
+/fnos/** text eol=lf
+/fnos/*.png binary
+/.github/workflows/** text eol=lf

@@ -1,0 +1,58 @@
+#!/bin/bash
+
+node="/var/apps/nodejs_v22/target/bin/node"
+server="${TRIM_APPDEST:?}/server.js"
+var="${TRIM_PKGVAR:?}"
+pidfile="$var/app.pid"
+port="${TRIM_SERVICE_PORT:-8787}"
+
+running() {
+    [ -r "$pidfile" ] || return 1
+    read -r pid < "$pidfile"
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] && [ -r "/proc/$pid/cmdline" ] &&
+        grep -Fxq -- "$server" < <(tr '\0' '\n' < "/proc/$pid/cmdline")
+}
+
+fail() {
+    echo "$*" >&2
+    if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+        printf '%s\n' "$*" > "$TRIM_TEMP_LOGFILE"
+    fi
+    exit 1
+}
+
+case "${1:-}" in
+    start)
+        running && exit 0
+        [ -x "$node" ] || fail "Node.js v22 is unavailable"
+        mkdir -p "$var/data" || fail "Cannot create the IPTV data directory"
+        PORT="$port" DATA_DIR="$var/data" nohup "$node" "$server" > "$var/app.log" 2>&1 < /dev/null &
+        pid=$!
+        printf '%s\n' "$pid" > "$pidfile"
+        for ((attempt=0; attempt<10; attempt++)); do
+            sleep 1
+            running || fail "IPTV failed to start. See $var/app.log"
+            if "$node" -e 'fetch("http://127.0.0.1:" + process.argv[1] + "/playlist.m3u", {signal: AbortSignal.timeout(800)}).then(response => { if (!response.ok) process.exitCode = 1; return response.body.cancel(); }).catch(() => process.exitCode = 1)' "$port"; then
+                exit 0
+            fi
+        done
+        kill -TERM "$pid"
+        fail "IPTV did not become ready. See $var/app.log"
+        ;;
+    stop)
+        if running; then
+            kill -TERM "$pid" || fail "Unable to stop IPTV"
+            for ((attempt=0; attempt<10; attempt++)); do
+                running || break
+                sleep 1
+            done
+            if running; then kill -KILL "$pid" || fail "Unable to stop IPTV"; fi
+        fi
+        rm -f -- "$pidfile"
+        ;;
+    status)
+        running && exit 0
+        exit 3
+        ;;
+    *) exit 1 ;;
+esac

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IPTV 频道管理台</title>
+  <script>
+    try {
+      const theme = localStorage.getItem('iptv-theme');
+      if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+    } catch {}
+  </script>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="app-bar">
+    <div class="app-bar-inner">
+    <button class="brand" data-page="channels" aria-label="IPTV 首页">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <strong>IPTV</strong><span class="brand-text">管理台</span>
+    </button>
+    <nav aria-label="管理功能">
+      <button data-page="channels" aria-current="page">频道与线路</button>
+      <button data-page="settings">设置</button>
+    </nav>
+    <label class="theme-control">
+      <span>外观</span>
+      <select id="theme" aria-label="外观">
+        <option value="system">跟随系统</option>
+        <option value="light">日间模式</option>
+        <option value="dark">夜间模式</option>
+      </select>
+    </label>
+    </div>
+  </header>
+  <main id="main"></main>
+  <output id="toast" role="status"></output>
+</body>
+</html>

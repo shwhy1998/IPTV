@@ -143,6 +143,10 @@ legend { padding: 0 .35rem; font-weight: 670; }
 .source-list { border: 1px solid var(--line); border-radius: 10px; }
 .source-item + .source-item, .source-list > .source-form { border-top: 1px solid var(--line); }
 .source-info { min-width: 0; }
+.logo-list { list-style: none; padding: 0; margin: 0; }
+.logo-row .logo { flex-shrink: 0; }
+.logo-row small { display: block; overflow-wrap: anywhere; }
+.logo-row button { flex-shrink: 0; }
 .source-url { overflow-wrap: anywhere; }
 .source-form { background: var(--inset); }
 .source-form:last-child { border-radius: 0 0 10px 10px; }

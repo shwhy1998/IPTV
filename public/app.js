@@ -8,6 +8,8 @@ let channelQuery = '';
 let managingGroups = false;
 let epgSources = [];
 let editingSource = null;
+let logoResults = new Map();
+let refreshingLogos = false;
 let toastTimer;
 
 const theme = document.querySelector('#theme');
@@ -105,16 +107,40 @@ function header(title, subtitle, action = '') {
   return `<header class="page-heading"><div><h1>${title}</h1><p>${subtitle}</p></div>${action}</header>`;
 }
 
-function channelLogo(channel) {
+function channelLogo(channel, saved = false) {
   const initials = channel.name.match(/^CCTV-(.+)$/)?.[1] || Array.from(channel.name).slice(0, 2).join('') || '台';
+  const source = saved ? './logos/' + encodeURIComponent(channel.id) : channel.logo;
   const logo = channel.logo
-    ? `<img class="logo-image" src="${attr(channel.logo)}" alt="" loading="lazy" decoding="async">` : '';
+    ? `<img class="logo-image" src="${attr(source)}" alt="" loading="lazy" decoding="async">` : '';
   return `<span class="logo" aria-hidden="true"><span class="logo-initials">${escape(initials)}</span>${logo}</span>`;
 }
 
 main.addEventListener('load', event => {
   if (event.target.matches('.logo-image')) event.target.parentElement.classList.add('logo-loaded');
 }, true);
+
+function logoManager() {
+  const hasRemote = state.channels.some(channel => /^https?:\/\//i.test(channel.logo));
+  const rows = state.channels.map(channel => {
+    const uploaded = channel.logo.startsWith('data:');
+    const result = logoResults.get(channel.id);
+    const status = result?.source === channel.logo
+      ? result.error ? `刷新失败：${result.error}` : '已刷新'
+      : channel.logo ? uploaded ? '已上传' : '图片链接' : '未设置台标';
+    return `<li class="row logo-row">
+      ${channelLogo(channel, true)}
+      <div class="grow source-info"><strong>${escape(channel.name)}</strong>
+        <small>${escape(status)}</small>
+        ${channel.logo && !uploaded ? `<small class="source-url">${escape(channel.logo)}</small>` : ''}</div>
+      ${button('编辑台标', 'edit-logo', `data-id="${attr(channel.id)}" aria-label="编辑 ${attr(channel.name)} 的台标"`)}
+    </li>`;
+  }).join('');
+  return header('台标管理', '按频道查看和编辑台标。刷新全部会重新下载图片链接。',
+    button(refreshingLogos ? '正在刷新…' : '刷新全部台标', 'refresh-logos',
+      `class="primary" ${hasRemote && !refreshingLogos ? '' : 'disabled'}`)) +
+    (rows ? `<ul class="panel logo-list" aria-label="频道台标">${rows}</ul>`
+      : '<p class="panel empty-group">添加频道后，可在这里管理台标。</p>');
+}
 
 function channelList() {
   const groups = groupNames(state);
@@ -138,7 +164,7 @@ function channelList() {
         const labels = channel.lines.map(line => line.label || line.protocol.toUpperCase());
         const terms = [channel.name, channel.group, ...channel.lines.map(line => line.target), ...labels].join(' ').toLowerCase();
         return `<article class="row channel-row" data-search="${attr(terms)}">
-        <div class="channel-identity">${channelLogo(channel)}<div><strong>${escape(channel.name)}</strong>
+        <div class="channel-identity">${channelLogo(channel, true)}<div><strong>${escape(channel.name)}</strong>
         <small class="channel-address">${escape(channel.lines[0]?.target || '')}</small></div></div>
         <div class="line-labels" aria-label="线路">${labels.map(label => `<span>${escape(label)}</span>`).join('')}</div>
         <div class="fcc-status ${fcc ? 'is-enabled' : ''}" aria-label="FCC ${fcc ? '已配置' : '未配置'}">${fcc ? '已配置' : '未配置'}</div>
@@ -186,6 +212,25 @@ function groupManager() {
 }
 
 const newLine = () => ({ label: '', protocol: 'rtp', target: '', mode: 'inherit', fcc: '', fccType: 'telecom' });
+function logoFields() {
+  const saved = state.channels.some(channel => channel.id === draft.id && channel.logo === draft.logo);
+  return `<div class="logo-editor">
+    <div id="logo-preview">${channelLogo(draft, saved)}</div>
+    <div class="grid">
+      ${field('图片链接', 'logo-url', draft.logo.startsWith('data:') ? '' : draft.logo, 'type="url" placeholder="https://…"')}
+      <label>上传图片<input type="file" name="logo-file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
+    </div>
+    ${button('移除台标', 'logo-remove', draft.logo ? '' : 'disabled')}
+  </div>`;
+}
+
+function logoEditor() {
+  return header('编辑台标', escape(draft.name)) +
+    `<form id="logo-form" class="panel form-stack">${logoFields()}
+      <div class="actions"><button class="primary">保存台标</button>${button('取消', 'cancel')}</div>
+    </form>`;
+}
+
 function editor() {
   const lines = draft.lines.map((line, index) => `<fieldset class="stream-line">
     <legend>线路 ${index + 1}</legend><div class="grid">
@@ -208,14 +253,7 @@ function editor() {
       ${guidePicker()}
       ${epgSources.some(source => source.channels.length) ? '' : '<p class="hint wide">先到设置刷新 EPG 源，即可搜索和选择频道。</p>'}
     </div><fieldset><legend>频道台标</legend>
-      <div class="logo-editor">
-        <div id="logo-preview">${channelLogo(draft)}</div>
-        <div class="grid">
-          ${field('图片链接', 'logo-url', draft.logo.startsWith('data:') ? '' : draft.logo, 'type="url" placeholder="https://…"')}
-          <label>上传图片<input type="file" name="logo-file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
-        </div>
-        ${button('移除台标', 'logo-remove', draft.logo ? '' : 'disabled')}
-      </div>
+      ${logoFields()}
     </fieldset><div class="section-title"><h2>组播线路</h2>${button('＋ 添加线路', 'line-add')}</div>
     <p class="hint">多条线路需要各自的标签。组播地址也支持「源 IP@组播 IP:端口」。</p>
     ${lines}<div class="actions"><button class="primary">保存频道</button>${button('取消', 'cancel')}
@@ -270,6 +308,7 @@ function render() {
   }
   main.innerHTML = ({
     channels: () => draft ? editor() : managingGroups ? groupManager() : channelList(),
+    logos: () => draft ? logoEditor() : logoManager(),
     settings: settingsPage
   })[page]();
   filterChannels();
@@ -380,10 +419,29 @@ document.addEventListener('click', async event => {
     } else if (action === 'edit') {
       epgSources = await api('/api/epg');
       draft = structuredClone(state.channels.find(channel => channel.id === id));
+    } else if (action === 'edit-logo') {
+      draft = structuredClone(state.channels.find(channel => channel.id === id));
+    } else if (action === 'refresh-logos') {
+      refreshingLogos = true;
+      control.disabled = true;
+      control.textContent = '正在刷新…';
+      try {
+        const { results } = await api('/api/logos/refresh', { method: 'POST' });
+        logoResults = new Map(results.map(result => [result.id, result]));
+        const failed = results.filter(result => result.error).length;
+        notice(`台标刷新完成，成功 ${results.length - failed} 个，失败 ${failed} 个`, failed > 0);
+      } finally {
+        refreshingLogos = false;
+        if (page === 'logos' && !draft) {
+          render();
+          main.querySelector('[data-action="refresh-logos"]')?.focus();
+        }
+      }
+      return;
     } else if (action === 'cancel') {
       draft = null;
     } else if (action === 'logo-remove') {
-      readDraft();
+      if (page === 'channels') readDraft();
       draft.logo = '';
     } else if (action.startsWith('line-')) {
       readDraft();
@@ -426,7 +484,8 @@ function updateLogoPreview(form) {
   const url = form.elements['logo-url'].value.trim();
   const logo = /^https?:\/\//i.test(url) && URL.canParse(url) ? url :
     !url && draft.logo.startsWith('data:') ? draft.logo : '';
-  form.querySelector('#logo-preview').innerHTML = channelLogo({ name: form.elements.name.value.trim(), logo });
+  const name = form.elements.name?.value.trim() || draft.name;
+  form.querySelector('#logo-preview').innerHTML = channelLogo({ name, logo });
   form.querySelector('[data-action="logo-remove"]').disabled = !url && !logo;
 }
 
@@ -439,7 +498,8 @@ main.addEventListener('input', event => {
     const form = event.target.form;
     form.querySelector('.epg-options').innerHTML = guideOptions(event.target.value, form.elements['epg-channel'].value);
   }
-  if (['logo-url', 'name'].includes(event.target.name) && event.target.form?.id === 'channel-form') {
+  if (['logo-url', 'name'].includes(event.target.name) &&
+      ['channel-form', 'logo-form'].includes(event.target.form?.id)) {
     updateLogoPreview(event.target.form);
   }
 });
@@ -555,6 +615,9 @@ main.addEventListener('submit', async event => {
       } else next.channels[position] = draft;
       next.groups = groupNames(next);
       sortChannelsByGroup(next);
+    } else if (form.id === 'logo-form') {
+      const channel = next.channels.find(channel => channel.id === draft.id);
+      channel.logo = value('logo-url') || (draft.logo.startsWith('data:') ? draft.logo : '');
     } else if (form.id === 'source-editor') {
       const id = form.dataset.source;
       const source = { id: id || newId(), name: value('source-name'), url: value('source-url') };

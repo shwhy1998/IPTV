@@ -46,6 +46,75 @@ if (migrate) {
 }
 let pendingSave = Promise.resolve();
 const epg = await createEpg(new URL('epg/', data), () => state.epgSources, () => state.epgRefreshTimes);
+const logoCache = new URL('logos/', data);
+await mkdir(logoCache, { recursive: true });
+const logoDownloads = new Map();
+let refreshingLogos;
+
+function logoType(body) {
+  if (body.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) return 'image/png';
+  if (body.subarray(0, 3).equals(Buffer.from('ffd8ff', 'hex'))) return 'image/jpeg';
+  const signature = body.toString('ascii', 0, 6);
+  if (signature === 'GIF87a' || signature === 'GIF89a') return 'image/gif';
+  if (body.toString('ascii', 0, 4) === 'RIFF' && body.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+}
+
+async function remoteLogo(source, refresh = false) {
+  const key = createHash('sha256').update(source).digest('hex');
+  const file = new URL(key, logoCache);
+  if (!refresh) {
+    const body = await readFile(file).catch(error => {
+      if (error.code !== 'ENOENT') throw error;
+    });
+    const type = body && logoType(body);
+    if (type) return { body, type };
+  }
+  if (logoDownloads.has(source)) return logoDownloads.get(source);
+  const download = (async () => {
+    const response = await fetch(source, { signal: AbortSignal.timeout(10000) });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`图片服务器返回 HTTP ${response.status}`);
+    }
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of response.body) {
+      size += chunk.length;
+      if (size > 4 * 1024 * 1024) throw new Error('台标超过 4 MiB');
+      chunks.push(chunk);
+    }
+    const body = Buffer.concat(chunks, size);
+    const type = logoType(body);
+    if (!type) throw new Error('台标需为 PNG、JPEG、WebP 或 GIF 图片');
+    const temporary = new URL(key + '.tmp', logoCache);
+    await writeFile(temporary, body);
+    await rename(temporary, file);
+    return { body, type };
+  })().finally(() => logoDownloads.delete(source));
+  logoDownloads.set(source, download);
+  return download;
+}
+
+function refreshLogos() {
+  if (refreshingLogos) return refreshingLogos;
+  const channels = state.channels.filter(channel => httpUrl(channel.logo));
+  const sources = Array.from(new Set(channels.map(channel => channel.logo)));
+  const failures = new Map();
+  async function refreshNext() {
+    for (let source; (source = sources.pop());) {
+      try {
+        await remoteLogo(source, true);
+      } catch (error) {
+        failures.set(source, error.message);
+      }
+    }
+  }
+  refreshingLogos = Promise.all(Array.from({ length: Math.min(sources.length, 4) }, refreshNext))
+    .then(() => channels.map(channel => ({
+      id: channel.id, source: channel.logo, error: failures.get(channel.logo) ?? ''
+    }))).finally(() => { refreshingLogos = undefined; });
+  return refreshingLogos;
+}
 
 function check(condition, message) {
   if (!condition) throw new Error(message);
@@ -108,7 +177,7 @@ function playlist(origin) {
   const guide = directGuide ? source.url : state.epgSources.length ? `${origin}/epg.xml` : '';
   const entries = [guide ? `#EXTM3U x-tvg-url="${attribute(guide)}"` : '#EXTM3U'];
   for (const channel of state.channels) {
-    const logo = channel.logo.startsWith('data:') ? `${origin}/logos/${channel.id}` : channel.logo;
+    const logo = channel.logo ? `${origin}/logos/${encodeURIComponent(channel.id)}` : '';
     const id = channel.epgSourceId && channel.epgId
       ? directGuide ? channel.epgId : guideId(state.epgSources.find(source => source.id === channel.epgSourceId), channel.epgId, state.epgSources)
       : '';
@@ -218,6 +287,9 @@ async function request(req, res, gateway = false) {
       return json({ saved: true });
     }
     if (reading && pathname === '/api/state') return json({ state });
+    if (pathname === '/api/logos/refresh' && req.method === 'POST') {
+      return json({ results: await refreshLogos() });
+    }
     if (reading && pathname === '/api/epg') return json(epg.report());
     if (pathname === '/api/epg/refresh' && req.method === 'POST') {
       const id = url.searchParams.get('source');
@@ -238,9 +310,19 @@ async function request(req, res, gateway = false) {
       return send(200, 'audio/x-mpegurl; charset=utf-8', playlist(origin));
     }
     if (reading && pathname.startsWith('/logos/')) {
-      const logo = state.channels.find(channel => channel.id === pathname.slice(7))?.logo;
+      const id = decodeURIComponent(pathname.slice(7));
+      const logo = state.channels.find(channel => channel.id === id)?.logo;
       const match = logo?.match(/^data:(image\/\w+);base64,(.+)$/);
       if (match) return send(200, match[1], Buffer.from(match[2], 'base64'));
+      if (logo && httpUrl(logo)) {
+        try {
+          const { body, type } = await remoteLogo(logo);
+          return send(200, type, body);
+        } catch (error) {
+          console.warn(`无法加载频道 ${id} 的台标: ${error.message}`);
+          return send(502, 'text/plain; charset=utf-8', '台标暂不可用');
+        }
+      }
     }
     const asset = assets.get(pathname);
     if (reading && asset) return sendCached(asset.type, asset);
